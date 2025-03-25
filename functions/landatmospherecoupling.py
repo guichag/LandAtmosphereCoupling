@@ -16,6 +16,11 @@ from scipy.stats import linregress
 
 # See https://stackoverflow.com/questions/29382903/how-to-apply-piecewise-linear-fit-in-python
 
+def flat_model(x, y0):
+    """Make flat model"""
+    out = np.piecewise(x, [x], [lambda x:y0])
+    return out
+
 def piecewise_linear_dt(x, x0, y0, k1):
     """Make piecewise linear model for dry to transitional regimes transition"""
     out = np.piecewise(x, [x < x0, x >= x0], [lambda x:y0, lambda x:k1*x + y0-k1*x0])
@@ -42,6 +47,11 @@ class LACR:
         self.x = sm
         self.y = ef
 
+    def fit_flat_model(self):
+        """Fit linear model"""
+        p, e = optimize.curve_fit(flat_model, self.x, self.y, p0=[self.y.mean()])
+        return p
+
     def fit_linear_model(self):
         """Fit linear model"""
         lr = linregress(self.x, self.y)
@@ -62,8 +72,19 @@ class LACR:
         """Fit dry-to-transitional-to-wet model"""
         wilt = self.fit_piecewise_linear_dt()[0]
         crit = self.fit_piecewise_linear_tw()[0]
-        p, e = optimize.curve_fit(piecewise_linear_dtw, self.x, self.y, p0=[wilt, crit, 0.1, 0.01]) # self.y.mean()/3
+        diff = crit - wilt
+        y0_ = np.percentile(self.y, 20)
+        if diff > 0:  # (self.x.max() - self.x.min()) / 5:
+            p, e = optimize.curve_fit(piecewise_linear_dtw, self.x, self.y, p0=[wilt, crit, y0_, 0.01])
+        else:
+            p = [np.nan, np.nan, np.nan, np.nan]
         return p
+
+    def predicted_flat(self):
+        """Compute predicted values from flat model"""
+        flat = self.fit_flat_model()
+        out = np.array([flat[0] for i in range(len(self.x))])
+        return out
 
     def predicted_lr(self):
         """Compute predicted values from linear model"""
@@ -91,6 +112,12 @@ class LACR:
         fit_dtw = self.fit_piecewise_linear_dtw()
         xd = np.linspace(self.x.min(), self.x.max(), len(self.x))
         out = piecewise_linear_dtw(xd, *fit_dtw)
+        return out
+
+    def compute_rss_flat(self):
+        """Compute residual sum of squares for linear model"""
+        y_ = self.predicted_flat()
+        out = np.sum(np.square(self.y - y_))
         return out
 
     def compute_rss_lr(self):
@@ -127,21 +154,24 @@ class LACR:
         """Compute residual sum of squares for dry-to-transitional-to-wet piecewise linear model"""
         df = pd.DataFrame(data={'x': self.x, 'y': self.y})
         fit_dtw = self.fit_piecewise_linear_dtw()
-        x0 = fit_dtw[0]
-        x1 = fit_dtw[1]
-        y0 = fit_dtw[2]
-        k1 = fit_dtw[3]
-        y1 = k1*(x1 - x0) + y0  # y1 = k1*(x1 - x0) + y0
-        yd = self.predicted_dtw()
-        rss0 = np.sum(np.square(df.y[df.x < x0] - y0))
-        rss1 = np.sum(np.square(df.y[(df.x >= x0) & (df.x < x1)] - yd[len(df.x[df.x < x0]):len(df.x) - len(df.x[df.x >= x1])]))
-        rss2 = np.sum(np.square(df.y[df.x >= x1] - y1))
-        out = rss0 + rss1 + rss2
+        if (np.isnan(fit_dtw).all() == False):
+            x0 = fit_dtw[0]
+            x1 = fit_dtw[1]
+            y0 = fit_dtw[2]
+            k1 = fit_dtw[3]
+            y1 = k1*(x1 - x0) + y0  # y1 = k1*(x1 - x0) + y0
+            yd = self.predicted_dtw()
+            rss0 = np.sum(np.square(df.y[df.x < x0] - y0))
+            rss1 = np.sum(np.square(df.y[(df.x >= x0) & (df.x < x1)] - yd[len(df.x[df.x < x0]):len(df.x) - len(df.x[df.x >= x1])]))
+            rss2 = np.sum(np.square(df.y[df.x >= x1] - y1))
+            out = rss0 + rss1 + rss2
+        else:
+            out = 10e12
         return out
 
     def get_models(self):
         """Get fitted models"""
-        out = {'linear': self.fit_linear_model(),
+        out = {'flat': self.fit_flat_model(), 'linear': self.fit_linear_model(),
                'dry-to-transitional': self.fit_piecewise_linear_dt(),
                'transitional-to-wet': self.fit_piecewise_linear_tw(),
                'dry-to-transitional-to-wet': self.fit_piecewise_linear_dtw()}
@@ -149,23 +179,34 @@ class LACR:
 
     def get_models_aic(self):
         """Compute model AIC: 2xDoF + Nxln(RSS)"""
+        aic_flat = 2 + len(self.x)*np.log(self.compute_rss_flat())
         aic_lr = 2*2 + len(self.x)*np.log(self.compute_rss_lr())
-        aic_dt = 2*3 + len(self.x)*np.log(self.compute_rss_dt())
-        aic_tw = 2*3 + len(self.x)*np.log(self.compute_rss_tw())
-        aic_dtw = 2*4 + len(self.x)*np.log(self.compute_rss_dtw())
-        aics =  {'linear': aic_lr, 'dry-to-transitional': aic_dt, 'transitional-to-wet': aic_tw, 'dry-to-transitional-to-wet': aic_dtw}
+        fit_lr = self.fit_linear_model()
+        k_lr = fit_lr[1]
+        if (aic_lr < aic_flat) and (abs(k_lr) > 0.002):  # fit 1-breakpoint models only if linear model performs better than flat and slope of linear model reasonably large
+            aic_dt = 2*3 + len(self.x)*np.log(self.compute_rss_dt())
+            aic_tw = 2*3 + len(self.x)*np.log(self.compute_rss_tw())
+            if (aic_dt < aic_lr) or (aic_tw < aic_lr):  # fit 2-breakpoint model only if at least one 1-breakpoint model performs better than linear
+                aic_dtw = 2*4 + len(self.x)*np.log(self.compute_rss_dtw())
+            else:
+                aic_dtw = 10e6
+        else:
+            aic_dt = 10e6
+            aic_tw = 10e6
+            aic_dtw = 10e6
+        aics =  {'flat': aic_flat, 'linear': aic_lr, 'dry-to-transitional': aic_dt, 'transitional-to-wet': aic_tw, 'dry-to-transitional-to-wet': aic_dtw}
         return aics
 
     def get_best_model(self):
-        """Return model with both lowest RSS and smallest number of degrees of freedom"""
+        """Return model with lowest AIC"""
         aics = self.get_models_aic()
-        imod = np.argmin([aic for aic in aics.values()])
+        imod = np.nanargmin([aic for aic in aics.values()])
         best_model = list(aics.keys())[imod]
         return best_model
 
     def get_best_model_number(self):
-        """Return the best model number: linear=0; dry-to-trans.=1; trans.-to-wet=2; dry-to-trans.-to-wet=3"""
-        numbers =  {'linear': 0, 'dry-to-transitional': 1, 'transitional-to-wet': 2, 'dry-to-transitional-to-wet': 3}
+        """Return the best model number"""
+        numbers =  {'flat': 0, 'linear': 1, 'dry-to-transitional': 2, 'transitional-to-wet': 3, 'dry-to-transitional-to-wet': 4}
         best_model = self.get_best_model()
         out = numbers[best_model]
         return out
@@ -173,12 +214,12 @@ class LACR:
     def get_best_model_params(self):
         """Get model parameters"""
         mod = self.get_best_model()
-        if mod == 'linear':
+        """if mod == 'linear':
             pmod = self.fit_linear_model()
             wilt = np.nan
             crit = np.nan
-            k = pmod[1]
-        elif mod == 'dry-to-transitional':
+            k = pmod[1]"""
+        if mod == 'dry-to-transitional':
             pmod = self.fit_piecewise_linear_dt()
             wilt = pmod[0]
             crit = np.nan
@@ -193,6 +234,10 @@ class LACR:
             wilt = pmod[0]
             crit = pmod[1]
             k = pmod[3]
+        else:
+            wilt = np.nan
+            crit = np.nan
+            k = np.nan
         return {'wilt': wilt, 'crit': crit, 'slope': k}
 
     def get_wilting_point(self):
@@ -230,7 +275,7 @@ class LACR:
         """Compute the fraction of time spent in the transitional regime [%]"""
         mod = self.get_best_model()
         params = self.get_best_model_params()
-        if mod == 'linear':
+        if (mod == 'flat') or (mod == 'linear'):
             x_trans = np.nan
             t_trans = np.nan
         elif mod == 'dry-to-transitional':
@@ -242,4 +287,6 @@ class LACR:
         elif mod == 'dry-to-transitional-to-wet':
             x_trans = self.x[(self.x > params['wilt']) & (self.x < params['crit'])]
             t_trans = len(x_trans) / len(self.x)
-        return t_trans*100
+        out = t_trans*100
+        return out
+
