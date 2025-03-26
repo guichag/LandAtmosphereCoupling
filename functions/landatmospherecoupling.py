@@ -1,4 +1,4 @@
-"""Create land-atmosphere coupling class"""
+"""Create Land-atmosphere coupling class"""
 
 import sys
 import os
@@ -36,6 +36,12 @@ def piecewise_linear_dtw(x, x0, x1, y0, k1):
     condlist = [x < x0, np.logical_and(x >= x0, x < x1), x >= x1]
     funclist = [lambda x: y0, lambda x: k1*(x-x0) + y0, lambda x:k1*(x1-x0) + y0]
     out = np.piecewise(x, condlist, funclist)
+    return out
+
+def compute_aic_rss(k, n, rss):
+    """Compute the RSS-based Akaike Information Criterion"""
+    """https://en.wikipedia.org/wiki/Akaike_information_criterion"""
+    out = 2*k + n*np.log(rss/n)
     return out
 
 
@@ -178,16 +184,16 @@ class LACR:
         return out
 
     def get_models_aic(self):
-        """Compute model AIC: 2xDoF + Nxln(RSS)"""
-        aic_flat = 2 + len(self.x)*np.log(self.compute_rss_flat())
-        aic_lr = 2*2 + len(self.x)*np.log(self.compute_rss_lr())
+        """Compute model AIC"""
+        aic_flat = compute_aic_rss(1, len(self.x), self.compute_rss_flat())
+        aic_lr = compute_aic_rss(2, len(self.x), self.compute_rss_lr())
         fit_lr = self.fit_linear_model()
         k_lr = fit_lr[1]
-        if (aic_lr < aic_flat) and (abs(k_lr) > 0.002):  # fit 1-breakpoint models only if linear model performs better than flat and slope of linear model reasonably large
-            aic_dt = 2*3 + len(self.x)*np.log(self.compute_rss_dt())
-            aic_tw = 2*3 + len(self.x)*np.log(self.compute_rss_tw())
-            if (aic_dt < aic_lr) or (aic_tw < aic_lr):  # fit 2-breakpoint model only if at least one 1-breakpoint model performs better than linear
-                aic_dtw = 2*4 + len(self.x)*np.log(self.compute_rss_dtw())
+        if (aic_lr < aic_flat) and (abs(aic_lr - aic_flat) > 2):  # and (abs(k_lr) > 0.002):  # fit 1-breakpoint models only if linear model performs significantly better than flat
+            aic_dt = compute_aic_rss(3, len(self.x), self.compute_rss_dt())
+            aic_tw = compute_aic_rss(3, len(self.x), self.compute_rss_tw())
+            if ((aic_dt < aic_lr) and (abs(aic_dt - aic_lr) > 2)) and ((aic_tw < aic_lr) and (abs(aic_tw - aic_lr) > 2)):  # fit 2-breakpoint models only if at least one 1-breakpoint model performs significantly better than linear
+                aic_dtw = compute_aic_rss(4, len(self.x), self.compute_rss_dtw())
             else:
                 aic_dtw = 10e6
         else:
