@@ -192,7 +192,7 @@ class LACR:
         if (aic_lr < aic_flat) and (abs(aic_lr - aic_flat) > 2):  # and (abs(k_lr) > 0.002):  # fit 1-breakpoint models only if linear model performs significantly better than flat
             aic_dt = compute_aic_rss(3, len(self.x), self.compute_rss_dt())
             aic_tw = compute_aic_rss(3, len(self.x), self.compute_rss_tw())
-            if ((aic_dt < aic_lr) and (abs(aic_dt - aic_lr) > 2)) and ((aic_tw < aic_lr) and (abs(aic_tw - aic_lr) > 2)):  # fit 2-breakpoint models only if at least one 1-breakpoint model performs significantly better than linear
+            if ((aic_dt < aic_lr) and (abs(aic_dt - aic_lr) > 2)) and ((aic_tw < aic_lr) and (abs(aic_tw - aic_lr) > 2)):  # fit 2-breakpoint models only 1-breakpoint models perform significantly better than linear
                 aic_dtw = compute_aic_rss(4, len(self.x), self.compute_rss_dtw())
             else:
                 aic_dtw = 10e6
