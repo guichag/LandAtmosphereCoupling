@@ -318,14 +318,3 @@ class LACR:
         out = t_trans*100
         return out
 
-    def plot_model_fits(self, lat, lon):
-        """Model SM and EF data with fitted models at a specific grid point"""
-        xd = np.linspace(self.x.min(), self.x.max(), len(self.x))
-
-        # get predicted (standardized) values -> transform with mu, sigma
-        plt.plot(xd, y_flat, color='k', lw=1.5, label='flat')
-        plt.plot(xd, y_lr, color='r', label='linear')
-        plt.plot(xd, y_dt, color='b', label='dry-trans')
-        plt.plot(xd, y_tw, color='g', label='trans-wet')
-        plt.plot(xd, y_dtw, color='yellow', label='dry-trans-wet')
-        plt.scatter(x, y, color='k', alpha=0.5, linewidths=0.)
