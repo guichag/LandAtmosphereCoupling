@@ -207,7 +207,7 @@ class LACR:
         aic_lr = compute_aic_rss(2, len(self.x), self.compute_rss_lr())
         fit_lr = self.fit_linear_model()
         k_lr = fit_lr[1]
-        if (aic_lr < aic_flat) and (abs(aic_lr - aic_flat) > 2): # and (abs(k_lr) > 0.05): # fit 1-breakpoint models only if linear model performs significantly better than flat and linear slope is large enough (a change in one std of SM increase/decrease EF by 0.05)
+        if (aic_lr < aic_flat) and (abs(aic_lr - aic_flat) > 2):  # fit 1-breakpoint models only if linear model performs significantly better than flat
             aic_dt = compute_aic_rss(3, len(self.x), self.compute_rss_dt())
             aic_tw = compute_aic_rss(3, len(self.x), self.compute_rss_tw())
             if ((aic_dt < aic_lr) and (abs(aic_dt - aic_lr) > 2)) or ((aic_tw < aic_lr) and (abs(aic_tw - aic_lr) > 2)):  # fit 2-breakpoint model only if one 1-breakpoint model performs significantly better than linear
